@@ -58,6 +58,7 @@ class Solver {
   double eps_pt_psto;
 
   double target_error;
+  double target_error_var;
 
   double eps_pt_max;
 
@@ -103,6 +104,7 @@ void Solver<S>::run() {
   std::setlocale(LC_ALL, "en_US.UTF-8");
   system.setup();
   target_error = Config::get<double>("target_error", 5.0e-5);
+  target_error_var = Config::get<double>("target_error_var", target_error);
   Result::put("energy_hf", system.energy_hf);
   Timer::end();
 
@@ -174,6 +176,7 @@ void Solver<S>::optimization_run() {
 
   std::vector<std::vector<size_t>> connections;
   target_error = Config::get<double>("target_error", 5.0e-5);
+  target_error_var = Config::get<double>("target_error_var", target_error);
 
   unsigned i_iter = 0;
   double prev_energy_var = 0., energy_var, diff_energy_var;
@@ -498,7 +501,7 @@ void Solver<S>::run_variation(const double eps_var, const bool until_converged) 
     }
 
     const double davidson_target_error =
-        until_converged ? target_error / 500000 : target_error / 50;
+        until_converged ? target_error_var / 500000 : target_error_var / 50;
     davidson.diagonalize(
         hamiltonian.matrix, system.coefs, davidson_target_error, Parallel::is_master());
     const std::vector<double> energy_var_new = davidson.get_lowest_eigenvalues();
@@ -512,7 +515,7 @@ void Solver<S>::run_variation(const double eps_var, const bool until_converged) 
       printf("\n");
     }
     for (unsigned i_state = 0; i_state < system.n_states; i_state++) {
-      if (std::abs(energy_var_new[i_state] - energy_var_prev[i_state]) > target_error * 0.001)
+      if (std::abs(energy_var_new[i_state] - energy_var_prev[i_state]) > target_error_var * 0.001)
         break;
       if (i_state == system.n_states) converged = true;
     }

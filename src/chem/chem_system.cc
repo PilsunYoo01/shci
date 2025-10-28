@@ -13,6 +13,7 @@
 #include "rdm.h"
 #include <eigen/Eigen/Dense>
 #include <fstream>
+#include <sstream>
 
 void ChemSystem::setup(const bool load_integrals_from_file) {
   if (load_integrals_from_file) { // during optimization, no need to reload
@@ -53,6 +54,68 @@ void ChemSystem::setup(const bool load_integrals_from_file) {
   coefs[0].push_back(1.0);
   for (unsigned i_state = 1; i_state < n_states; i_state++)  {
     coefs[i_state].push_back(1e-16);
+  }
+
+  // Optionally seed with an initial set of determinants from file (keeping HF as dets[0]).
+  const std::string init_dets_filename = Config::get<std::string>("initial_dets_file", std::string(""));
+  if (!init_dets_filename.empty()) {
+    if (Parallel::is_master()) {
+      printf("Loading initial determinants from: %s\n", init_dets_filename.c_str());
+    }
+    std::ifstream init_file(init_dets_filename);
+    if (!init_file.good()) {
+      throw std::runtime_error(Util::str_printf("cannot open initial_dets_file: %s", init_dets_filename.c_str()));
+    }
+    const bool one_based = Config::get<bool>("initial_dets_1based", true);
+    // Use a small map to avoid duplicates while preserving order (HF remains at index 0)
+    std::unordered_set<Det, DetHasher> seen;
+    seen.insert(integrals.det_hf);
+    std::string line;
+    size_t n_loaded = 0;
+    while (std::getline(init_file, line)) {
+      // Skip empty/comment lines
+      bool empty_line = true;
+      for (char c : line) {
+        if (!std::isspace(static_cast<unsigned char>(c)) && c != '#') { empty_line = false; break; }
+        if (c == '#') { empty_line = true; break; }
+      }
+      if (empty_line) continue;
+
+      std::istringstream iss(line);
+      std::vector<long long> tokens;
+      long long x;
+      while (iss >> x) tokens.push_back(x);
+      if (tokens.size() != static_cast<size_t>(n_up + n_dn)) {
+        throw std::runtime_error("initial_dets_file line does not have n_up + n_dn integers");
+      }
+      Det det;
+      for (unsigned i = 0; i < n_up; i++) {
+        long long orb = tokens[i];
+        if (one_based) orb -= 1;
+        if (orb < 0 || static_cast<unsigned>(orb) >= n_orbs) {
+          throw std::runtime_error("initial_dets_file contains invalid up orbital index");
+        }
+        det.up.set(static_cast<unsigned>(orb));
+      }
+      for (unsigned i = 0; i < n_dn; i++) {
+        long long orb = tokens[n_up + i];
+        if (one_based) orb -= 1;
+        if (orb < 0 || static_cast<unsigned>(orb) >= n_orbs) {
+          throw std::runtime_error("initial_dets_file contains invalid dn orbital index");
+        }
+        det.dn.set(static_cast<unsigned>(orb));
+      }
+      if (seen.count(det)) continue;
+      seen.insert(det);
+      dets.push_back(det);
+      for (unsigned i_state = 0; i_state < n_states; i_state++) {
+        coefs[i_state].push_back(1e-16);
+      }
+      n_loaded++;
+    }
+    if (Parallel::is_master()) {
+      printf("Loaded %'zu initial dets (excluding HF). Total dets now: %'zu\n", n_loaded, dets.size());
+    }
   }
   energy_hf = get_hamiltonian_elem(integrals.det_hf, integrals.det_hf, 0);
   if (Parallel::is_master()) {
