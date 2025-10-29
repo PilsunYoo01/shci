@@ -474,8 +474,8 @@ void Solver<S>::run_variation(const double eps_var, const bool until_converged) 
       if (Parallel::is_master()) {
         printf("Maximum variational iterations (%zu) reached\n", max_var_iterations);
       }
-      converged = true;
-      break;
+      //converged = true;
+      dets_converged = true;
     }
     
     eps_tried_prev.resize(n_dets, Util::INF);
