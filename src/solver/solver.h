@@ -115,6 +115,7 @@ void Solver<S>::run() {
     run_all_variations();
 
     if (Config::get<bool>("2rdm", false) || Config::get<bool>("get_2rdm_csv", false) ||
+        Config::get<bool>("spin_2rdm", false) || Config::get<bool>("get_spin_2rdm_csv", false) ||
         Config::get<bool>("optorb", false)) {
       hamiltonian.update(system);
       connections = hamiltonian.matrix.get_connections();

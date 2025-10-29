@@ -685,6 +685,20 @@ void ChemSystem::post_variation(std::vector<std::vector<size_t>>& connections) {
     rdm.dump_2rdm(Config::get<bool>("get_2rdm_csv", false));
   }
 
+  // Spin-resolved RDM calculations
+  if (Config::get<bool>("get_spin_1rdm_csv", false)) {
+    RDM rdm(integrals, dets, coefs);
+    rdm.get_spin_1rdm();
+    rdm.dump_spin_1rdm();
+  }
+
+  if (Config::get<bool>("spin_2rdm", false) || Config::get<bool>("get_spin_2rdm_csv", false)) {
+    RDM rdm(integrals, dets, coefs);
+    rdm.get_spin_2rdm(connections);
+    connections.clear();
+    rdm.dump_spin_2rdm(Config::get<bool>("get_spin_2rdm_csv", false));
+  }
+
   bool unpacked = false;
 
   if (Config::get<bool>("s2", false)) {
