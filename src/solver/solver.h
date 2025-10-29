@@ -430,14 +430,75 @@ void Solver<S>::run_variation(const double eps_var, const bool until_converged) 
   system.energy_hf_1b = second_rejection ? system.get_e_hf_1b() : 0.;
   system.second_rejection_factor = Config::get<double>("second_rejection_factor", 0.2);
 
+  // Add maximum iteration control for HCI expansion
+  const size_t max_var_iterations = Config::get<size_t>("max_var_iterations", 0);
+  const bool use_max_iterations = (max_var_iterations > 0);
+  
+  // Add early termination control for determinant generation
+  const bool stop_expansion_early = Config::get<bool>("stop_expansion_early", false);
+  const size_t max_expansion_iterations = Config::get<size_t>("max_expansion_iterations", 0);
+  const bool use_max_expansion_iterations = (max_expansion_iterations > 0);
+
+  // Initial diagonalization if we have loaded determinants (more than just HF)
+  const bool has_initial_dets = (system.get_n_dets() > 1);
+  const bool do_initial_diagonalization = Config::get<bool>("initial_diagonalization", has_initial_dets);
+  
+  if (do_initial_diagonalization && has_initial_dets && iteration == 0) {
+    if (Parallel::is_master()) {
+      printf("Performing initial diagonalization with %zu determinants\n", system.get_n_dets());
+    }
+    
+    Timer::start("initial diagonalization");
+    Davidson initial_davidson(system.n_states);
+    hamiltonian.update(system);
+    
+    const double initial_target_error = target_error_var / 1000;  // Looser tolerance for initial diag
+    initial_davidson.diagonalize(
+        hamiltonian.matrix, system.coefs, initial_target_error, Parallel::is_master());
+    
+    system.coefs = initial_davidson.get_lowest_eigenvectors();
+    system.energy_var = initial_davidson.get_lowest_eigenvalues();
+    
+    Timer::end();
+    
+    if (Parallel::is_master()) {
+      printf("Initial diagonalization complete. Energy: ");
+      for (const auto& energy : system.energy_var) printf(" %.8f", energy);
+      printf("\n");
+    }
+  }
+
   while (!converged) {
+    // Check maximum iteration limit at the beginning of each iteration
+    if (use_max_iterations && iteration >= max_var_iterations) {
+      if (Parallel::is_master()) {
+        printf("Maximum variational iterations (%zu) reached\n", max_var_iterations);
+      }
+      converged = true;
+      break;
+    }
+    
     eps_tried_prev.resize(n_dets, Util::INF);
     if (until_converged) Timer::start(Util::str_printf("#%zu", iteration + 1));
 
     // Random execution and broadcast.
     if (!dets_converged) {
       n_dets_new = n_dets;
+      size_t expansion_iteration = 0;
       for (size_t j = 0; j < 5; j++) {
+        expansion_iteration++;
+        
+        // Check for early termination of determinant generation
+        if (stop_expansion_early || (use_max_expansion_iterations && expansion_iteration > max_expansion_iterations)) {
+          if (Parallel::is_master()) {
+            if (stop_expansion_early) {
+              printf("Early termination of determinant generation requested\n");
+            } else {
+              printf("Maximum expansion iterations (%zu) reached - stopping determinant generation\n", max_expansion_iterations);
+            }
+          }
+          break;
+        }
         fgpl::DistRange<size_t>(j, n_dets, 5).for_each([&](const size_t i) {
           const auto& det = system.dets[i];
           double max_coef = system.coefs[0][i];
@@ -525,6 +586,7 @@ void Solver<S>::run_variation(const double eps_var, const bool until_converged) 
     if (dets_converged && davidson.converged) {
       converged = true;
     }
+    
     n_dets = n_dets_new;
     energy_var_prev = energy_var_new;
     if (!until_converged) break;

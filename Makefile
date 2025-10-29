@@ -1,5 +1,5 @@
 # Default options.
-CXX := mpic++
+CXX := /home/_qamd/apps/openmpi-3.0.6_build/bin/mpic++
 CXX_WARNING_OPTIONS := -Wall -Wextra -Wno-unused-result
 CXXFLAGS := -std=c++11 -O3 -fopenmp $(CXX_WARNING_OPTIONS)
 LDLIBS := -pthread -lpthread
