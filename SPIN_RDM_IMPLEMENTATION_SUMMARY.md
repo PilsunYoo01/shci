@@ -186,3 +186,6 @@ When `get_spin_2rdm_csv: true`:
 The spin-resolved RDM implementation provides a comprehensive and efficient solution for spin-specific density matrix calculations in SHCI. The implementation maintains the high performance and scalability characteristics of the original SHCI code while adding powerful new capabilities for spin analysis and magnetic property calculations.
 
 The modular design ensures easy maintenance and future extensions, while the comprehensive documentation and examples facilitate user adoption and understanding.
+
+
+

@@ -453,7 +453,7 @@ void Solver<S>::run_variation(const double eps_var, const bool until_converged) 
     Davidson initial_davidson(system.n_states);
     hamiltonian.update(system);
     
-    const double initial_target_error = target_error_var / 1000;  // Looser tolerance for initial diag
+    const double initial_target_error = target_error_var / 1000;  // Tighter tolerance for initial diag
     initial_davidson.diagonalize(
         hamiltonian.matrix, system.coefs, initial_target_error, Parallel::is_master());
     
@@ -563,7 +563,7 @@ void Solver<S>::run_variation(const double eps_var, const bool until_converged) 
     }
 
     const double davidson_target_error =
-        until_converged ? target_error_var / 500000 : target_error_var / 50;
+        until_converged ? target_error_var / 100 : target_error_var / 10;
     davidson.diagonalize(
         hamiltonian.matrix, system.coefs, davidson_target_error, Parallel::is_master());
     const std::vector<double> energy_var_new = davidson.get_lowest_eigenvalues();
