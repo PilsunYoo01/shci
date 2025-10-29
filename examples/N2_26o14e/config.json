@@ -1,0 +1,23 @@
+{
+  "system": "chem",
+  "n_up": 5,
+  "n_dn": 5,
+  "initial_dets_file": "my_determinants.txt",
+  "initial_dets_1based": false,
+  "eps_vars": [
+    1e-04
+  ],
+  "eps_vars_schedule": [
+    1e-04
+  ],
+  "chem": {
+    "point_group": "C1"
+  },
+  "s2": false,
+  "load_integrals_cache": false,
+  "stop_expansion_early": false,
+  "var_only": true,
+  "max_var_iterations": 3,
+  "max_expansion_iterations": 5,
+  "initial_diagonalization": true
+}
