@@ -1,5 +1,5 @@
 #include <hps/src/hps.h>
-#include <shci/src/det/det.h>
+#include <det/det.h>
 #include <iomanip>
 #include <fstream>
 #include <vector>
