@@ -48,70 +48,121 @@ void ChemSystem::setup(const bool load_integrals_from_file) {
   setup_singles_queue();
   Timer::end();
 
-  dets.push_back(integrals.det_hf);
+  // Optionally seed with an initial set of determinants from file. Allow opting out of HF.
+  const std::string init_dets_filename = Config::get<std::string>("initial_dets_file", std::string(""));
+  const bool include_hf_with_initial = Config::get<bool>("include_hf_with_initial_dets", true);
 
-  coefs.resize(n_states);
-  coefs[0].push_back(1.0);
-  for (unsigned i_state = 1; i_state < n_states; i_state++)  {
-    coefs[i_state].push_back(1e-16);
+  // Initialize determinants/coefs: include HF unless an initial file is provided and inclusion is disabled.
+  if (init_dets_filename.empty() || include_hf_with_initial) {
+    dets.push_back(integrals.det_hf);
+    coefs.resize(n_states);
+    coefs[0].push_back(1.0);
+    for (unsigned i_state = 1; i_state < n_states; i_state++)  {
+      coefs[i_state].push_back(1e-16);
+    }
+  } else {
+    // Ensure coefs vectors are sized for states but start empty; entries will be appended with loaded dets.
+    coefs.resize(n_states);
   }
 
-  // Optionally seed with an initial set of determinants from file (keeping HF as dets[0]).
-  const std::string init_dets_filename = Config::get<std::string>("initial_dets_file", std::string(""));
+  // Optionally seed with an initial set of determinants from file.
   if (!init_dets_filename.empty()) {
     if (Parallel::is_master()) {
       printf("Loading initial determinants from: %s\n", init_dets_filename.c_str());
     }
-    std::ifstream init_file(init_dets_filename);
-    if (!init_file.good()) {
-      throw std::runtime_error(Util::str_printf("cannot open initial_dets_file: %s", init_dets_filename.c_str()));
-    }
+    const bool read_binary = Config::get<bool>("initial_dets_binary", false);
     const bool one_based = Config::get<bool>("initial_dets_1based", true);
-    // Use a small map to avoid duplicates while preserving order (HF remains at index 0)
+    // Use a small map to avoid duplicates while preserving order (optionally excluding HF)
     std::unordered_set<Det, DetHasher> seen;
-    seen.insert(integrals.det_hf);
-    std::string line;
+    if (include_hf_with_initial) seen.insert(integrals.det_hf);
     size_t n_loaded = 0;
-    while (std::getline(init_file, line)) {
-      // Skip empty/comment lines
-      bool empty_line = true;
-      for (char c : line) {
-        if (!std::isspace(static_cast<unsigned char>(c)) && c != '#') { empty_line = false; break; }
-        if (c == '#') { empty_line = true; break; }
-      }
-      if (empty_line) continue;
 
-      std::istringstream iss(line);
-      std::vector<long long> tokens;
-      long long x;
-      while (iss >> x) tokens.push_back(x);
-      if (tokens.size() != static_cast<size_t>(n_up + n_dn)) {
-        throw std::runtime_error("initial_dets_file line does not have n_up + n_dn integers");
+    if (read_binary) {
+      std::ifstream init_file(init_dets_filename, std::ios::binary);
+      if (!init_file.good()) {
+        throw std::runtime_error(Util::str_printf("cannot open initial_dets_file: %s", init_dets_filename.c_str()));
       }
-      Det det;
-      for (unsigned i = 0; i < n_up; i++) {
-        long long orb = tokens[i];
-        if (one_based) orb -= 1;
-        if (orb < 0 || static_cast<unsigned>(orb) >= n_orbs) {
-          throw std::runtime_error("initial_dets_file contains invalid up orbital index");
+      const size_t rec_size = static_cast<size_t>(n_up + n_dn);
+      std::vector<int32_t> buf(rec_size);
+      while (true) {
+        init_file.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(rec_size * sizeof(int32_t)));
+        const std::streamsize bytes_read = init_file.gcount();
+        if (bytes_read == 0) break;  // EOF
+        if (bytes_read != static_cast<std::streamsize>(rec_size * sizeof(int32_t))) {
+          throw std::runtime_error("initial_dets_file truncated binary record");
         }
-        det.up.set(static_cast<unsigned>(orb));
-      }
-      for (unsigned i = 0; i < n_dn; i++) {
-        long long orb = tokens[n_up + i];
-        if (one_based) orb -= 1;
-        if (orb < 0 || static_cast<unsigned>(orb) >= n_orbs) {
-          throw std::runtime_error("initial_dets_file contains invalid dn orbital index");
+        Det det;
+        for (unsigned i = 0; i < n_up; i++) {
+          long long orb = static_cast<long long>(buf[i]);
+          if (one_based) orb -= 1;
+          if (orb < 0 || static_cast<unsigned>(orb) >= n_orbs) {
+            throw std::runtime_error("initial_dets_file contains invalid up orbital index");
+          }
+          det.up.set(static_cast<unsigned>(orb));
         }
-        det.dn.set(static_cast<unsigned>(orb));
+        for (unsigned i = 0; i < n_dn; i++) {
+          long long orb = static_cast<long long>(buf[n_up + i]);
+          if (one_based) orb -= 1;
+          if (orb < 0 || static_cast<unsigned>(orb) >= n_orbs) {
+            throw std::runtime_error("initial_dets_file contains invalid dn orbital index");
+          }
+          det.dn.set(static_cast<unsigned>(orb));
+        }
+        if (seen.count(det)) continue;
+        seen.insert(det);
+        dets.push_back(det);
+        for (unsigned i_state = 0; i_state < n_states; i_state++) {
+          coefs[i_state].push_back(1e-16);
+        }
+        n_loaded++;
       }
-      if (seen.count(det)) continue;
-      seen.insert(det);
-      dets.push_back(det);
-      for (unsigned i_state = 0; i_state < n_states; i_state++) {
-        coefs[i_state].push_back(1e-16);
+    } else {
+      std::ifstream init_file(init_dets_filename);
+      if (!init_file.good()) {
+        throw std::runtime_error(Util::str_printf("cannot open initial_dets_file: %s", init_dets_filename.c_str()));
       }
-      n_loaded++;
+      std::string line;
+      while (std::getline(init_file, line)) {
+        // Skip empty/comment lines
+        bool empty_line = true;
+        for (char c : line) {
+          if (!std::isspace(static_cast<unsigned char>(c)) && c != '#') { empty_line = false; break; }
+          if (c == '#') { empty_line = true; break; }
+        }
+        if (empty_line) continue;
+
+        std::istringstream iss(line);
+        std::vector<long long> tokens;
+        long long x;
+        while (iss >> x) tokens.push_back(x);
+        if (tokens.size() != static_cast<size_t>(n_up + n_dn)) {
+          throw std::runtime_error("initial_dets_file line does not have n_up + n_dn integers");
+        }
+        Det det;
+        for (unsigned i = 0; i < n_up; i++) {
+          long long orb = tokens[i];
+          if (one_based) orb -= 1;
+          if (orb < 0 || static_cast<unsigned>(orb) >= n_orbs) {
+            throw std::runtime_error("initial_dets_file contains invalid up orbital index");
+          }
+          det.up.set(static_cast<unsigned>(orb));
+        }
+        for (unsigned i = 0; i < n_dn; i++) {
+          long long orb = tokens[n_up + i];
+          if (one_based) orb -= 1;
+          if (orb < 0 || static_cast<unsigned>(orb) >= n_orbs) {
+            throw std::runtime_error("initial_dets_file contains invalid dn orbital index");
+          }
+          det.dn.set(static_cast<unsigned>(orb));
+        }
+        if (seen.count(det)) continue;
+        seen.insert(det);
+        dets.push_back(det);
+        for (unsigned i_state = 0; i_state < n_states; i_state++) {
+          coefs[i_state].push_back(1e-16);
+        }
+        n_loaded++;
+      }
     }
     if (Parallel::is_master()) {
       printf("Loaded %'zu initial dets (excluding HF). Total dets now: %'zu\n", n_loaded, dets.size());

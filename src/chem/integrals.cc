@@ -35,9 +35,10 @@ void Integrals::load() {
 }
 
 void Integrals::read_fcidump() {
-  std::ifstream fcidump("FCIDUMP");
+  const std::string fcidump_path = Config::get<std::string>("fcidump_file", std::string("FCIDUMP"));
+  std::ifstream fcidump(fcidump_path);
   if (!fcidump.good()) {
-    throw new std::runtime_error("cannot open FCIDUMP");
+    throw new std::runtime_error(Util::str_printf("cannot open FCIDUMP: %s", fcidump_path.c_str()));
   }
 
   // Read head.
